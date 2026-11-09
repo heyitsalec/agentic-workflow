@@ -165,13 +165,23 @@ function buildPlan(packetDirIn: string, opts: PlanOptions): Plan {
       `\`lint_packet.py ${homeRel(packetDir)} --json ${homeRel(lintPath)}\` first`);
   }
   const lintM = statSync(lintPath).mtimeMs, contentM = statSync(contentPath).mtimeMs;
-  if (lintM < contentM) {
-    refuse(`${homeRel(lintPath)} is older than content.json (lint ${new Date(lintM).toISOString()}, build ` +
-      `${new Date(contentM).toISOString()}): lint this build before loading it (D24)`);
-  }
   const meta = readJson(metaPath, "meta.json");
   const content = readJson(contentPath, "build/content.json");
   const lint = readJson(lintPath, "build/lint.json");
+  const generated = toTimestamp(content["generated"]) ?? refuse("build/content.json has no `generated` stamp (the build key)");
+  // Lint belongs to this build: by the content.json stamp lint.json recorded (content_generated) when it has one, else
+  // by lint.json's own timestamp against the build's `generated`, else by file mtimes (lint.json written after
+  // content.json).
+  const lintFor = toTimestamp(lint["content_generated"]);
+  const lintAt = toTimestamp(lint["linted_at"] ?? lint["generated"]);
+  if (lintFor !== null) {
+    if (lintFor !== generated) refuse(`build/lint.json linted build ${String(lint["content_generated"])}, not this build (${String(content["generated"])}): lint this build before loading it (D24)`);
+  } else if (lintAt !== null) {
+    if (lintAt < generated) refuse(`build/lint.json (linted ${lintAt}) is older than this build (${generated}): lint this build before loading it (D24)`);
+  } else if (lintM < contentM) {
+    refuse(`${homeRel(lintPath)} is older than content.json (lint ${new Date(lintM).toISOString()}, build ` +
+      `${new Date(contentM).toISOString()}): lint this build before loading it (D24)`);
+  }
   if (lint["compiled"] === true) refuse("build/lint.json linted a temporary compile (compiled: true), not this build");
   const lintPacket = str(lint["packet"]);
   if (lintPacket && real(lintPacket) !== real(packetDir)) refuse(`build/lint.json was written for another packet (${lintPacket})`);
@@ -199,7 +209,6 @@ function buildPlan(packetDirIn: string, opts: PlanOptions): Plan {
   if (cmeta["rev"] !== undefined && cmeta["rev"] !== null && cmeta["rev"] !== rev) {
     refuse(`build/content.json was compiled at rev ${String(cmeta["rev"])} but meta.json is at rev ${rev}: rebuild first`);
   }
-  const generated = toTimestamp(content["generated"]) ?? refuse("build/content.json has no `generated` stamp (the build key)");
   const stats = obj(content["stats"]);
   const refs = obj(content["refs"]);
   const cites = arr(content["cites"]).map(obj);
@@ -209,17 +218,24 @@ function buildPlan(packetDirIn: string, opts: PlanOptions): Plan {
   const pagePath = join(buildDir, "tdd.html");
   let pageBytes: number | null = null, bundle: number | null = null;
   if (existsSync(pagePath)) {
-    pageBytes = statSync(pagePath).size;
-    bundle = bundleGzipBytes(readFileSync(pagePath, "utf8"));
+    // Only a page rendered from this content.json: newer than it, and carrying the same `generated` when it embeds one.
+    const html = readFileSync(pagePath, "utf8");
+    const embedded = html.match(/"generated"\s*:\s*"([^"]+)"/)?.[1] ?? null;
+    const fresh = statSync(pagePath).mtimeMs >= contentM && (embedded === null || toTimestamp(embedded) === generated);
+    if (fresh) {
+      pageBytes = statSync(pagePath).size;
+      bundle = bundleGzipBytes(html);
+    } else notes.push(`page_bytes: build/tdd.html is from another build (${embedded ?? "older than content.json"}); left NULL`);
   } else notes.push("page_bytes: build/tdd.html absent");
   // meta.published is the date of the packet's last publish, and it is not moved on every rebuild: it counts as this
-  // build's publish only when it is not older than the build itself (dates in UTC). Otherwise published_at stays NULL
-  // until a publish is recorded (`tdd load-db <packet> --published <surface> <url>`).
+  // build's publish only when it is not earlier than the build itself. A date without a time reads as midnight UTC, so
+  // a publish dated the build's own day does not count (it could be the publish of an earlier build that day).
+  // Otherwise published_at stays NULL until a publish is recorded (`tdd load-db <packet> --published artifact <url>`).
   const metaPublished = toTimestamp(meta["published"]);
-  const fits = (t: string | null) => (t !== null && t.slice(0, 10) >= generated.slice(0, 10) ? t : null);
+  const fits = (t: string | null) => (t !== null && t >= generated ? t : null);
   const publishedAt = fits(metaPublished);
   if (metaPublished && !publishedAt) {
-    notes.push(`published_at: meta.json published ${String(meta["published"])} predates this build (${generated.slice(0, 10)}); left NULL until a publish is recorded`);
+    notes.push(`published_at: meta.json published ${String(meta["published"])} is not after this build (${generated}); left NULL until a publish is recorded`);
   }
   const linkedCount = int(refs["linked"]) ?? arr(refs["links"]).filter((l) => obj(l)["linked"] !== false).length;
   const unlinked = arr(refs["unlinked"]).filter((u): u is string => typeof u === "string");
@@ -248,15 +264,19 @@ function buildPlan(packetDirIn: string, opts: PlanOptions): Plan {
     const status = typeof d["status"] === "string" ? d["status"] : "";
     const parsed = parseDecisionStatus(status);
     const quote = typeof d["quote"] === "string" && d["quote"] !== "" ? d["quote"] : null;   // verbatim: never trimmed
-    // Who, when and where come from the status line's dated segment ("Deferred · Alec, 2026-11-06" -> Alec): the
-    // compiler's decidedBy takes the first segment ("Deferred", "Open") and is not used. An open decision has no
-    // decider and no date yet, even when its status carries one ("Provisional · Alec, 2026-11-06").
-    const decided = state !== "open";
+    // Who, when and where come from the status line's dated segment ("Deferred · Owner, 2026-01-06" -> Owner): the
+    // compiler's decidedBy takes the first segment ("Deferred", "Open") and is not used. A tentative status
+    // ("Provisional · Owner, 2026-01-06", "Open · ...") has no decider yet; a named, dated status counts even when the
+    // compiler's state is open ("Owner, 2026-01-08 · direction, not built").
+    const tentative = /^(open|provisional|proposed|waiting)\b/i.test(status.trim());
+    const decided = state !== "open" || (parsed.by !== null && parsed.on !== null && !tentative);
+    const decidedOn = str(d["decidedOn"]);
+    if (decidedOn !== null && !isDate(decidedOn)) refuse(`decision ${token} has decidedOn ${decidedOn}, not a calendar date`);
     return {
       token, prefix, number, title: str(d["question"]) ?? str(d["title"]) ?? token, status, state,
       quote, reading: typeof d["reading"] === "string" && d["reading"] !== "" ? d["reading"] : null,
       decided_by: decided ? parsed.by : null,
-      decided_on: decided ? str(d["decidedOn"]) ?? parsed.on : null,
+      decided_on: decided ? decidedOn ?? parsed.on : null,
       source: decided ? parsed.source : null,
       section_id: str(d["section"]), anchor: str(d["anchor"]) ?? token.toLowerCase(),
     };
@@ -281,7 +301,7 @@ function buildPlan(packetDirIn: string, opts: PlanOptions): Plan {
   }
 
   // ---- citations (content.json cites; where they resolved comes from lint.json citations[] when present)
-  const lintedAt = new Date(lintM).toISOString();
+  const lintedAt = lintAt ?? new Date(lintM).toISOString();
   const lintedOn = lintedAt.slice(0, 10);
   const lintCites = Array.isArray(lint["citations"]) ? (lint["citations"] as unknown[]).map(obj) : null;
   const exact = new Map<string, Json>(), byPath = new Map<string, Json>();
@@ -329,6 +349,9 @@ function buildPlan(packetDirIn: string, opts: PlanOptions): Plan {
     const experiments = arr(push["experiments"]).map(obj).map((e) => str(e["name"])).filter((n): n is string => !!n);
     const scoredBuild = lastHistoryBuild(join(evalDir, "history.jsonl"), label);
     const skipped: string[] = [];
+    const scorerFile = new Map<string, string>();
+    const pushM = existsSync(join(evalDir, "push.json")) ? statSync(join(evalDir, "push.json")).mtimeMs : -1;
+    let stalePush = false;
     for (const f of outputs) {
       const out = readJson(join(evalDir, f), `build/eval/${f}`);
       const kind = str(out["kind"]) ?? f.replace(/^output\.|\.json$/g, "");
@@ -339,10 +362,16 @@ function buildPlan(packetDirIn: string, opts: PlanOptions): Plan {
       const ranAt = toTimestamp(out["generated"]) ?? lintedAt;
       // <stem>-<kind>, stem <slug>-rev<rev> by default (eval_packet.py --experiment); never another rev's experiment
       const sameRev = (n: string) => (n.match(/-rev(\d+)-/)?.[1] ?? String(rev)) === String(rev);
-      const experiment = experiments.find((n) => n === `${slug}-rev${rev}-${kind}`)
+      // push.json carries no build stamp: it names this run's experiments only when written after the outputs.
+      const pushFresh = pushM >= statSync(join(evalDir, f)).mtimeMs;
+      if (!pushFresh && experiments.length) stalePush = true;
+      const experiment = !pushFresh ? null : experiments.find((n) => n === `${slug}-rev${rev}-${kind}`)
         ?? experiments.find((n) => n.endsWith(`-${kind}`) && sameRev(n)) ?? null;
       for (const s of scores) {
         const scorer = str(s["name"]) ?? refuse(`a score in build/eval/${f} has no name`);
+        const dup = scorerFile.get(`${kind}/${scorer}`);
+        if (dup) refuse(`eval scorer ${kind}/${scorer} appears in both build/eval/${dup} and build/eval/${f}`);
+        scorerFile.set(`${kind}/${scorer}`, f);
         const status = EVAL_STATUS[String(s["status"]).trim().toLowerCase()]
           ?? refuse(`build/eval/${f} ${scorer} has status ${String(s["status"])}; expected ok, not run or error`);
         evalRuns.push({
@@ -352,6 +381,7 @@ function buildPlan(packetDirIn: string, opts: PlanOptions): Plan {
         });
       }
     }
+    if (stalePush) notes.push("eval_run: build/eval/push.json is older than the outputs; braintrust_experiment left NULL");
     if (skipped.length) notes.push(`eval_run: skipped ${skipped.length} output(s) that did not score this build (${label}, ${content["generated"]}): ${skipped.join("; ")}`);
   } else notes.push("eval_run: build/eval absent");
 
@@ -368,7 +398,33 @@ function buildPlan(packetDirIn: string, opts: PlanOptions): Plan {
       published_at: fits(toTimestamp(meta["notion_published"])) ?? revision.published_at });
   }
 
-  return { ok: true, packetDir, buildDir, packet, revision, decisions, referenceLinks, citations, lintFindings, evalRuns, publications, notes };
+  const plan: Plan = { ok: true, packetDir, buildDir, packet, revision, decisions, referenceLinks, citations, lintFindings, evalRuns, publications, notes };
+  validate(plan);
+  return plan;
+}
+
+const INT4 = 2147483647;
+const INT_KEYS = new Set(["rev", "sections", "diagrams", "decisions", "prs", "schema_tables", "refs_linked", "refs_unlinked", "citations",
+  "lint_errors", "lint_warnings", "page_bytes", "bundle_gzip_bytes", "number", "line_from", "line_to", "line"]);
+/** Refuse what Postgres would reject, so a dry run says what the load will do: NUL bytes, integers past int4. */
+function validate(plan: Plan): void {
+  const tables: [string, readonly object[]][] = [
+    ["packet", [plan.packet]], ["revision", [plan.revision]], ["decision", plan.decisions], ["reference_link", plan.referenceLinks ?? []],
+    ["citation", plan.citations], ["lint_finding", plan.lintFindings], ["eval_run", plan.evalRuns], ["publication", plan.publications],
+  ];
+  for (const [table, rows] of tables) {
+    for (const row of rows) {
+      for (const [k, v] of Object.entries(row)) {
+        if (typeof v === "string" && v.includes("\u0000")) refuse(`${table}.${k} contains a NUL byte, which Postgres text cannot hold`);
+        if (v && typeof v === "object" && JSON.stringify(v).includes("\\u0000")) refuse(`${table}.${k} contains a NUL byte, which jsonb cannot hold`);
+        if (typeof v === "number" && INT_KEYS.has(k) && Math.abs(v) > INT4) refuse(`${table}.${k} is ${v}, past the integer column's range`);
+      }
+    }
+  }
+}
+
+function isDate(s: string): boolean {
+  return ISO_DATE.test(s) && !Number.isNaN(Date.parse(`${s}T00:00:00Z`)) && new Date(`${s}T00:00:00Z`).toISOString().slice(0, 10) === s;
 }
 
 /** The content.json `generated` stamp the last eval run of this label scored (history.jsonl), if recorded. */

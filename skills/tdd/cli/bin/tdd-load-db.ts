@@ -1,19 +1,19 @@
 #!/usr/bin/env bun
 // tdd load-db: load a built, linted packet into the system database (D17, D23, D24). The loader runs after lint and
 // never before: a build without a current build/lint.json is refused. The compiler never writes to the database.
-import { existsSync, readFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
-import { applySchema, connect, recordPublish, writePlan, type Counts } from "../src/db/load";
+import { applySchema, connect, writePlan, type Counts } from "../src/db/load";
 import { planLoad, SURFACES, type Plan, type Surface } from "../src/db/plan";
 
 const USAGE = `usage: tdd load-db <packet-dir> [--build <dir>] [--database-url <url>] [--dry-run] [--json]
-       tdd load-db <packet-dir> --published <artifact|notion|other> <url> [--database-url <url>] [--dry-run] [--json]
+       tdd load-db <packet-dir> --published <artifact|notion|other> <url> [--build <dir>] [--database-url <url>] [--dry-run] [--json]
 
   Loads <packet>/build (or --build <dir>) into the system database: the packet, one revision row per build
   (packet, rev, content.json generated), and that build's decisions, reference links, citations, lint findings,
   eval runs and publications, replaced in one transaction so a reload never duplicates. Refuses (exit 1) when
   build/lint.json is missing, older than build/content.json, or written for another build (D24: after lint).
-  --published records a publish after the fact on the latest loaded build of meta.json's rev.
+  --published records that the build on disk (its content.json generated stamp) was just published on that surface:
+  the build is loaded (or reloaded) and marked in the same transaction; only an artifact publish sets
+  revision.published_at.
   --database-url defaults to $DATABASE_URL, then postgres://localhost/tdd_system. --dry-run reads and plans only.
   Exit 0 loaded, 1 refused or failed, 2 usage.`;
 
@@ -46,7 +46,6 @@ function parse(argv: string[]): Args | string {
     else pos.push(t);
   }
   if (pos.length !== 1) return pos.length ? `one packet folder, not ${pos.length}` : "a packet folder is required";
-  if (a.published && a.build) return "--published records a publish; it takes no --build";
   return { ...a, packet: pos[0]! } as Args;
 }
 
@@ -65,6 +64,7 @@ function countsOf(plan: Plan): Counts {
   };
 }
 const line = (c: Counts) => TABLES.map((t) => `${t} ${c[t] === null ? "skipped" : c[t]}`).join(", ");
+const lintLine = (p: Plan) => `lint ${p.revision.lint_errors} error(s), ${p.revision.lint_warnings} warning(s)`;
 
 export async function main(argv: string[]): Promise<number> {
   if (argv.includes("--help") || argv.includes("-h")) { console.log(USAGE); return 0; }
@@ -76,61 +76,35 @@ export async function main(argv: string[]): Promise<number> {
   };
   const refused = (reason: string) => { out({ status: "refused", reason }, `tdd load-db: refused: ${reason}`, true); return 1; };
 
-  if (args.published) return publish(args, out, refused);
-
   const plan = planLoad(args.packet, { build: args.build });
   if (!plan.ok) return refused(plan.reason);
   const name = `${plan.packet.repo_slug}/${plan.packet.slug} rev ${plan.revision.rev} (build ${plan.revision.generated.replace(".000Z", "Z")})`;
   const base = { packet: `${plan.packet.repo_slug}/${plan.packet.slug}`, rev: plan.revision.rev, generated: plan.revision.generated, notes: plan.notes };
   if (args.dryRun) {
     const c = countsOf(plan);
-    out({ status: "dry-run", ...base, rows: c }, `tdd load-db ${name}: dry run, nothing written; would write ${line(c)}`);
+    if (args.published) c.publication = new Set([...plan.publications.map((x) => x.surface), args.published.surface]).size;
+    const pub = args.published ? `; would record ${args.published.surface} published now` : "";
+    out({ status: "dry-run", ...base, rows: c, published: args.published ?? null },
+      `tdd load-db ${name}: dry run, nothing written; would write ${line(c)} (${lintLine(plan)})${pub}`);
     if (!args.json) for (const n of plan.notes) console.error(`note: ${n}`);
     return 0;
   }
   const db = connect(args.databaseUrl);
   try {
     await applySchema(db);
-    const res = await writePlan(db, plan);
+    const res = await writePlan(db, plan, { publish: args.published });
     const { revisionId, newest, ...c } = res;
-    out({ status: "loaded", ...base, database: dbLabel(args.databaseUrl), revision_id: revisionId, newest_build: newest, rows: c },
-      `tdd load-db ${name} -> ${dbLabel(args.databaseUrl)}: ${line(c)}`);
+    const pub = args.published
+      ? `; ${args.published.surface} publish recorded on this build${args.published.surface === "artifact" ? ", revision.published_at set" : ""}`
+      : "";
+    out({ status: args.published ? "published" : "loaded", ...base, database: dbLabel(args.databaseUrl), revision_id: revisionId,
+      newest_build: newest, rows: c, lint: { errors: plan.revision.lint_errors, warnings: plan.revision.lint_warnings },
+      published: args.published ?? null },
+      `tdd load-db ${name} -> ${dbLabel(args.databaseUrl)}: ${line(c)} (${lintLine(plan)})${pub}`);
     if (!args.json) for (const n of plan.notes) console.error(`note: ${n}`);
     return 0;
   } catch (e) {
     out({ status: "failed", ...base, error: (e as Error).message }, `tdd load-db: failed: ${(e as Error).message}`, true);
-    return 1;
-  } finally {
-    await db.close();
-  }
-}
-
-async function publish(
-  args: Args, out: (o: Record<string, unknown>, text: string, err?: boolean) => void, refused: (r: string) => number,
-): Promise<number> {
-  const pub = args.published!;
-  const packetDir = resolve(args.packet);
-  const metaPath = join(packetDir, "meta.json");
-  if (!existsSync(metaPath)) return refused(`${metaPath} is missing`);
-  let rev: unknown;
-  try { rev = (JSON.parse(readFileSync(metaPath, "utf8")) as Record<string, unknown>)["rev"]; } catch (e) { return refused(`meta.json: ${(e as Error).message}`); }
-  if (typeof rev !== "number" || !Number.isInteger(rev)) return refused("meta.json has no integer rev");
-  const who = { repo_slug: basename(dirname(dirname(packetDir))), slug: basename(packetDir), rev, surface: pub.surface, url: pub.url };
-  const name = `${who.repo_slug}/${who.slug} rev ${rev}`;
-  if (args.dryRun) {
-    out({ status: "dry-run", packet: `${who.repo_slug}/${who.slug}`, rev, published: pub }, `tdd load-db ${name}: dry run; would record ${pub.surface} published now`);
-    return 0;
-  }
-  const db = connect(args.databaseUrl);
-  try {
-    await applySchema(db);
-    const r = await recordPublish(db, who);
-    if (!r.ok) return refused(r.reason);
-    out({ status: "published", packet: `${who.repo_slug}/${who.slug}`, rev, surface: pub.surface, revision_id: r.revisionId, generated: r.generated },
-      `tdd load-db ${name}: ${pub.surface} publish recorded on build ${r.generated.replace(".000Z", "Z")} -> ${dbLabel(args.databaseUrl)}: publication 1, revision.published_at set`);
-    return 0;
-  } catch (e) {
-    out({ status: "failed", error: (e as Error).message }, `tdd load-db: failed: ${(e as Error).message}`, true);
     return 1;
   } finally {
     await db.close();

@@ -17,9 +17,22 @@ export function connect(url?: string | undefined): SQL {
   return new SQL(url || process.env["DATABASE_URL"] || DEFAULT_DATABASE_URL);
 }
 
-/** Apply sql/schema.sql (idempotent) and check the database is at the version this loader writes. */
-export async function applySchema(db: SQL): Promise<number> {
-  await db.unsafe(await Bun.file(SCHEMA_FILE).text());
+const SCHEMA_LOCK = 0x7464_6431; // pg_advisory lock key for applying the schema ("tdd1")
+
+/**
+ * Apply sql/schema.sql once and check the database is at the version this loader writes. The DDL runs only when the
+ * database has no schema_version yet (or with force), inside one transaction behind an advisory lock: CREATE INDEX on a
+ * table another loader is writing takes a ShareLock that deadlocks against that loader's row locks.
+ */
+export async function applySchema(db: SQL, opts: { force?: boolean } = {}): Promise<number> {
+  const [have] = await db`SELECT to_regclass('public.schema_version') IS NOT NULL AS present`;
+  if (opts.force || !have.present) {
+    const ddl = await Bun.file(SCHEMA_FILE).text();
+    await db.begin(async (tx) => {
+      await tx`SELECT pg_advisory_xact_lock(${SCHEMA_LOCK})`;
+      await tx.unsafe(ddl);
+    });
+  }
   const rows: { version: number }[] = await db`SELECT version FROM schema_version`;
   const version = rows[0]?.version;
   if (version !== SCHEMA_VERSION) throw new Error(`database schema_version is ${String(version)}; this loader writes version ${SCHEMA_VERSION}`);
@@ -32,8 +45,17 @@ async function insertAll(tx: SQL, table: string, rows: Record<string, unknown>[]
   return rows.length;
 }
 
-/** Load one planned build. Returns the rows written per table (reference_link null when the table was skipped). */
-export async function writePlan(db: SQL, plan: Plan): Promise<Counts & { revisionId: string; newest: boolean }> {
+export type Publish = { surface: Surface; url: string };
+
+/**
+ * Load one planned build. With `publish`, also record that THIS build was just published on that surface, in the same
+ * transaction: the publication row gets now(), and revision.published_at is set when the surface is the artifact (the
+ * source of truth; a mirror alone does not publish a build). Returns the rows written per table (reference_link null
+ * when the table was skipped).
+ */
+export async function writePlan(
+  db: SQL, plan: Plan, opts: { publish?: Publish | undefined } = {},
+): Promise<Counts & { revisionId: string; newest: boolean }> {
   return db.begin(async (tx) => {
     const p = plan.packet, r = plan.revision;
     const [pk] = await tx`
@@ -72,7 +94,16 @@ export async function writePlan(db: SQL, plan: Plan): Promise<Counts & { revisio
           visibility = COALESCE(EXCLUDED.visibility, publication.visibility),
           published_at = COALESCE(EXCLUDED.published_at, publication.published_at)`;
     }
-    const publication = pubs.length;
+    const publish = opts.publish;
+    if (publish) {
+      await tx`
+        INSERT INTO publication (revision_id, surface, url, is_source_of_truth, published_at)
+        VALUES (${revisionId}, ${publish.surface}, ${publish.url}, ${publish.surface === "artifact"}, now())
+        ON CONFLICT (revision_id, surface) DO UPDATE SET url = EXCLUDED.url, is_source_of_truth = EXCLUDED.is_source_of_truth,
+          published_at = EXCLUDED.published_at`;
+      if (publish.surface === "artifact") await tx`UPDATE revision SET published_at = now() WHERE id = ${revisionId}`;
+    }
+    const publication = new Set([...plan.publications.map((x) => x.surface), ...(publish ? [publish.surface] : [])]).size;
 
     // Decisions are per packet, updated in place by the newest loaded build; an older build only lowers first_rev.
     const [nw] = await tx`
@@ -96,28 +127,5 @@ export async function writePlan(db: SQL, plan: Plan): Promise<Counts & { revisio
     return {
       packet: 1, revision: 1, decision: drows.length, reference_link, citation, lint_finding, eval_run, publication, revisionId, newest,
     };
-  });
-}
-
-export type PublishResult = { ok: true; revisionId: string; generated: string } | { ok: false; reason: string };
-
-/** Record a publish after the fact: the latest loaded build of (packet, rev) gets the publication row and published_at. */
-export async function recordPublish(
-  db: SQL, a: { repo_slug: string; slug: string; rev: number; surface: Surface; url: string },
-): Promise<PublishResult> {
-  return db.begin(async (tx) => {
-    const rows: { id: string; generated: Date }[] = await tx`
-      SELECT r.id, r.generated FROM revision r JOIN packet p ON p.id = r.packet_id
-      WHERE p.repo_slug = ${a.repo_slug} AND p.slug = ${a.slug} AND r.rev = ${a.rev}
-      ORDER BY r.generated DESC LIMIT 1`;
-    const hit = rows[0];
-    if (!hit) return { ok: false as const, reason: `no loaded build of ${a.repo_slug}/${a.slug} rev ${a.rev}: run tdd load-db on the packet first` };
-    await tx`
-      INSERT INTO publication (revision_id, surface, url, is_source_of_truth, published_at)
-      VALUES (${hit.id}, ${a.surface}, ${a.url}, ${a.surface === "artifact"}, now())
-      ON CONFLICT (revision_id, surface) DO UPDATE SET url = EXCLUDED.url, is_source_of_truth = EXCLUDED.is_source_of_truth,
-        published_at = EXCLUDED.published_at`;
-    await tx`UPDATE revision SET published_at = now() WHERE id = ${hit.id}`;
-    return { ok: true as const, revisionId: hit.id, generated: new Date(hit.generated).toISOString() };
   });
 }

@@ -78,7 +78,8 @@ CREATE TABLE IF NOT EXISTS decision (
   decided_by text NULL,                                    -- card: NOT NULL; NULL while the decision is open
   decided_on date NULL,                                    -- card: NOT NULL; same
   source text NULL,                                        -- card: NOT NULL; where it was said, when the page says
-  first_rev integer NOT NULL,
+  first_rev integer NOT NULL,                              -- the lowest LOADED rev that carried it (not derived
+                                                           -- from the packet's history)
   section_id text NULL,                                    -- card: added
   anchor text NOT NULL,                                    -- card: added
   created_at timestamptz NOT NULL DEFAULT now(),
