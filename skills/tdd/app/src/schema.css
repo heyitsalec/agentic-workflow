@@ -1,0 +1,547 @@
+/* schema.css: the D7 table drawer (src/components/SchemaDrawer.tsx) drawn the Snowsight way (D14a, DataGrid.tsx), its
+   docked chat (D14c, DataChat.tsx), and the diagram-hotspot badge for boxes that open it. Loaded after
+   templates/tdd-system/tdd.css; tokens only, so light and dark both come from the token blocks there.
+   Classes: dialog.drawer.schema(.expanded), .drawer-head, h2.drawer-name, .drawer-acts, .drawer-expand, .drawer-close,
+   .drawer-body, .drawer-sec, .drawer-summary (Details tab); tabs .dg-tabs, .dg-tab(.on), .dg-count, .dg-panel; Data
+   preview .dg-bar, .dg-filter, .dg-btn(.on), .dg-bands(.multi) > .dg-band (.dg-band-cap, .dg-band-names) > .dg-grid
+   (.banded; thead tr.dg-head th.h-new|h-changed|num, .dg-hc > .dg-h + .dg-sb, .dg-glyph.g-<kind>, th.rn, tbody tr.hot, td.null,
+   td.num, td.long, .dg-more), .dg-ghost-box > .dg-ghost (the hidden measuring copy), .dg-cap; stats .dg-mini,
+   .dg-meter, .dg-hist, .dg-freq; Columns .schema-legend (.lg), .dg-cols (tr.col-new|changed|dropped; td.cn, .cnote,
+   td.ct, .was, td.rg .dg-range, td.ds); Details .tbrief (TableBrief.tsx, below), .dg-kv, pre.ddl, .mono-list, .drawer-notes, .where; chat .dchat(.off),
+   .dchat-off, .dchat-log, .dchat-msg.user|assistant, .dchat-steps, .dchat-note, .dchat-form, .dchat-btn, .dchat-src;
+   .hs.has-table::after. */
+
+/* ---------------------------------------------------------------- the dialog: right-side panel, full height */
+html:has(dialog.drawer[open]) { overflow: hidden; }
+dialog.drawer {
+  position: fixed; inset: 0 0 0 auto; margin: 0; padding: 0;
+  width: min(720px, 100vw); max-width: 100vw; height: 100dvh; max-height: 100dvh;
+  color: var(--fg); background: var(--surface);
+  border: 0; border-left: 1px solid var(--line); border-radius: var(--r-lg) 0 0 var(--r-lg);
+  box-shadow: -24px 0 64px var(--shadow); overflow: hidden;
+}
+dialog.drawer[open] { display: flex; flex-direction: column; }
+dialog.drawer::backdrop { background: var(--scrim); }
+@media (prefers-reduced-motion: no-preference) {
+  dialog.drawer[open] { animation: drawer-in .18s ease-out; }
+  @keyframes drawer-in { from { transform: translateX(28px); opacity: 0; } }
+}
+@media (max-width: 640px) {
+  dialog.drawer { width: 100vw; border-left: 0; border-radius: 0; }
+}
+/* the Expand view (D26): the same dialog, centred, landscape, 95% of the page each way. The body becomes a column so
+   the one-band grid fills what the head, the bar and the chat leave, scrolling both ways under its sticky header. */
+dialog.drawer.expanded {
+  inset: 0; margin: auto; width: 95vw; max-width: 95vw; height: 95dvh; max-height: 95dvh;
+  border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: 0 24px 80px var(--shadow);
+}
+@media (prefers-reduced-motion: no-preference) {
+  dialog.drawer.expanded[open] { animation: modal-in .16s ease-out; }
+  @keyframes modal-in { from { transform: scale(0.985); opacity: 0.6; } }
+}
+dialog.drawer.expanded .drawer-body { display: flex; flex-direction: column; gap: 14px; }
+dialog.drawer.expanded #dg-panel-preview:not([hidden]) { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+dialog.drawer.expanded .dg-preview { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+dialog.drawer.expanded .dg-bands { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; }
+dialog.drawer.expanded .dg-band { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; }
+dialog.drawer.expanded .dg-grid { flex: 0 1 auto; min-height: 140px; max-height: none; }
+dialog.drawer.expanded .dg-cap { flex: none; }
+
+/* the head (D26): one row holding the name and state chip, the tabs, Expand and Close; the tabs' underline sits on the
+   head's bottom rule. Phones wrap it to two rows: name and Close, then the tabs. */
+.drawer-head {
+  flex: none; display: flex; align-items: stretch; gap: 0 16px; min-height: 50px; box-sizing: border-box;
+  padding: env(safe-area-inset-top, 0px) max(20px, env(safe-area-inset-right, 0px)) 0 20px;
+  background: var(--surface); border-bottom: 1px solid var(--line);
+}
+.drawer-head h2.drawer-name {
+  flex: 0 1 auto; min-width: 0; margin: 0; padding: 0; border: 0; display: flex; align-items: center; gap: 8px;
+  font-size: 1rem; white-space: nowrap;
+}
+.drawer-name code {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 650 0.95rem/1.25 var(--font-mono);
+  background: none; padding: 0; color: var(--fg);
+}
+.drawer-name .chip { flex: none; font-size: 0.66rem; padding: 2px 7px; }
+.drawer-acts { flex: none; display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.drawer-close, .drawer-expand {
+  flex: none; display: inline-flex; align-items: center; gap: 6px; font: 500 var(--fs-xs)/1 var(--font-body);
+  padding: 7px 12px; border-radius: var(--r-pill); border: 1px solid var(--line-strong); background: var(--surface);
+  color: var(--fg); cursor: pointer; white-space: nowrap;
+}
+.drawer-close:hover, .drawer-expand:hover { background: var(--surface-2); }
+.drawer-expand { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--surface)); background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
+.drawer-expand:hover { background: color-mix(in srgb, var(--accent) 13%, var(--surface)); }
+@media (max-width: 640px) {
+  .drawer-head { flex-wrap: wrap; padding-top: max(10px, env(safe-area-inset-top, 0px)); row-gap: 6px; }
+  .drawer-head h2.drawer-name { flex: 1 1 0; }
+  .drawer-head .dg-tabs { order: 3; flex: 1 0 100%; }
+  .drawer-expand { display: none; }
+}
+
+.drawer-body {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  padding: 16px max(20px, env(safe-area-inset-right, 0px)) 24px 20px;
+  display: grid; gap: 14px; align-content: start;
+}
+.drawer-body > * { min-width: 0; }
+.drawer-summary { font-size: var(--fs-sm); max-width: none; margin: 0; color: var(--fg); }
+.drawer-sec { display: grid; gap: 8px; min-width: 0; }
+.drawer-sec > h3 { margin: 0; font: 650 var(--fs-xs)/1.3 var(--font-body); text-transform: uppercase; letter-spacing: var(--tr-label); color: var(--muted); }
+.drawer-body .none { color: var(--muted); font-style: italic; }
+.drawer-body p.none { font-size: var(--fs-sm); }
+
+/* state and change chips (tdd.css already has .chip.new for the good tone) */
+.schema .chip.changed { --chip: var(--warn); }
+.schema .chip.dropped { --chip: var(--danger); }
+
+/* ---------------------------------------------------------------- tabs: in the head row, like Snowsight's object tabs */
+.dg-tabs {
+  flex: 0 1 auto; min-width: 0; display: flex; gap: 16px; align-items: stretch; overflow-x: auto; scrollbar-width: none;
+}
+.dg-tabs::-webkit-scrollbar { display: none; }
+.dg-tab {
+  flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 0 0 1px; margin-bottom: -1px;
+  font: 600 var(--fs-sm)/1.2 var(--font-body); color: var(--muted); background: none; border: 0; border-bottom: 2px solid transparent;
+  cursor: pointer; white-space: nowrap; min-height: 44px; box-sizing: border-box;
+}
+.dg-tab:hover { color: var(--fg); }
+.dg-tab.on { color: var(--fg); border-bottom-color: var(--accent); }
+.dg-count {
+  font: 600 0.66rem/1 var(--font-mono); padding: 3px 6px; border-radius: var(--r-pill);
+  color: var(--muted); background: var(--surface-2); border: 1px solid var(--line);
+}
+.dg-tab.on .dg-count { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, var(--surface)); background: color-mix(in srgb, var(--accent) 9%, var(--surface)); }
+.dg-panel { display: grid; gap: 16px; min-width: 0; }
+.dg-panel[hidden] { display: none; }
+.dg-panel > * { min-width: 0; }
+.dg-cap { font-size: var(--fs-xs); line-height: 1.5; color: var(--muted); max-width: none; margin: 0; }
+.dg-cap b { color: var(--fg); font-weight: 600; }
+.dg-cap code { font-size: 0.95em; }
+
+/* ---------------------------------------------------------------- Data preview: filter bar, then the grid */
+.dg-preview { display: grid; gap: 8px; min-width: 0; }
+.dg-bar { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.dg-filter input {
+  width: min(220px, 52vw); font: 400 var(--fs-sm)/1.2 var(--font-body); color: var(--fg); background: var(--surface);
+  padding: 6px 10px; border: 1px solid var(--line-strong); border-radius: var(--r-md);
+}
+.dg-filter input::placeholder { color: var(--muted); }
+.dg-shown { font: 500 var(--fs-xs)/1.2 var(--font-body); color: var(--muted); font-variant-numeric: tabular-nums; }
+.dg-actions { margin-left: auto; display: inline-flex; gap: 6px; }
+.dg-btn {
+  font: 500 var(--fs-xs)/1 var(--font-body); padding: 6px 10px; border-radius: var(--r-pill); cursor: pointer;
+  border: 1px solid var(--line-strong); background: var(--surface); color: var(--fg); white-space: nowrap;
+}
+.dg-btn:hover { background: var(--surface-2); }
+.dg-btn.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--surface)); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+.dg-btn:disabled { opacity: 0.5; cursor: default; }
+.dg-toast { position: absolute; right: 0; top: calc(100% + 4px); z-index: 4; font-size: var(--fs-xs); padding: 4px 8px; border-radius: var(--r-sm); color: var(--good); background: var(--surface); border: 1px solid var(--line); box-shadow: 0 4px 12px var(--shadow); }
+
+.dg-grid {
+  overflow: auto; overscroll-behavior: contain; max-height: min(58dvh, 560px);
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md);
+}
+.dg-grid:focus-visible { outline-offset: 0; }
+.dg-grid table, .dg-ghost table { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; font: 400 0.75rem/1.45 var(--font-mono); font-variant-numeric: tabular-nums; }
+.dg-grid th, .dg-grid td, .dg-ghost th, .dg-ghost td { padding: 5px 10px; white-space: nowrap; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); }
+.dg-grid th:last-child, .dg-grid td:last-child { border-right: 0; }
+.dg-grid tbody tr:last-child > * { border-bottom: 0; }
+.dg-grid thead th { position: sticky; z-index: 2; background: var(--surface-2); }
+.dg-grid tr.dg-head th, .dg-ghost tr.dg-head th { top: 0; height: 34px; box-sizing: border-box; padding: 0 10px; vertical-align: middle; }
+.dg-grid tr.dg-head th.num, .dg-ghost tr.dg-head th.num { text-align: right; }
+.dg-grid tr.dg-head th.h-new { box-shadow: inset 0 -2px 0 var(--good); }
+.dg-grid tr.dg-head th.h-changed { box-shadow: inset 0 -2px 0 var(--warn); }
+.dg-grid .rn { position: sticky; left: 0; z-index: 1; min-width: 3ch; text-align: right; color: var(--muted); background: var(--surface-2); font-weight: 400; }
+.dg-ghost .rn { min-width: 3ch; }
+.dg-grid thead .rn { z-index: 3; }
+.dg-grid tbody tr:hover > td, .dg-grid tbody tr.hot > td { background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
+.dg-grid tbody tr.hot > th.rn { color: var(--accent); }
+.dg-grid td.null { color: var(--muted); font-style: italic; }
+.dg-grid td.num { text-align: right; }
+.dg-grid td.long, .dg-ghost td.long { max-width: 46ch; }
+.dg-grid td.long.open, .dg-ghost td.long.open { white-space: normal; }
+.dg-empty { color: var(--muted); font-style: italic; }
+.dg-h {
+  display: inline-flex; align-items: center; gap: 6px; padding: 0; margin: 0; border: 0; background: none; cursor: pointer;
+  font: 600 0.72rem/1 var(--font-mono); color: var(--fg); white-space: nowrap;
+}
+.dg-h:hover .nm { text-decoration: underline; text-underline-offset: 3px; }
+.dg-h .chip { font-size: 0.62rem; line-height: 1.35; padding: 1px 6px; font-family: var(--font-body); }
+.dg-sort { font-size: 0.6rem; color: var(--accent); }
+.dg-more { display: block; width: 100%; padding: 0; margin: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.dg-more .ell { margin-left: 1px; padding: 0 4px; border-radius: var(--r-sm); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+.dg-more pre { margin: 0; padding: 0; background: none; border: 0; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; max-width: 56ch; }
+
+/* bands (D26): a grid wider than the drawer is cut into stacked bands of whole columns, each with the same row numbers
+   in its sticky first column; the bands grow with their rows (the drawer body scrolls), and a column wider than the
+   drawer still scrolls sideways inside its band. .dg-ghost is a hidden copy of the whole grid that gives each column's
+   natural width: clipped by .dg-ghost-box so it adds no scroll area, and hidden from assistive tech. */
+.dg-bands { position: relative; display: grid; gap: 14px; min-width: 0; }
+.dg-band { display: grid; gap: 5px; min-width: 0; }
+.dg-band-cap { margin: 0; max-width: none; font-size: var(--fs-xs); line-height: 1.3; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dg-band-cap b { color: var(--fg); font-weight: 600; }
+.dg-band-names { font-family: var(--font-mono); font-size: 0.95em; }
+.dg-grid.banded { max-height: none; }
+.dg-bands.multi .dg-band + .dg-band .dg-grid { border-top: 2px solid color-mix(in srgb, var(--accent) 30%, var(--line)); }
+.dg-ghost-box { position: absolute; left: 0; right: 0; top: 0; height: 0; overflow: hidden; visibility: hidden; pointer-events: none; }
+.dg-ghost { position: absolute; left: 0; top: 0; width: max-content; }
+.dg-ghost table { min-width: 0; }
+
+/* type glyphs (house reading; see references/data-view.md) */
+.dg-glyph {
+  --g: var(--muted);
+  flex: none; display: inline-grid; place-items: center; min-width: 18px; height: 16px; padding: 0 3px; box-sizing: border-box;
+  font: 700 0.6rem/1 var(--font-mono); letter-spacing: -0.02em; color: var(--g); border-radius: 3px;
+  background: color-mix(in srgb, var(--g) 12%, var(--surface)); border: 1px solid color-mix(in srgb, var(--g) 30%, var(--surface));
+}
+.dg-glyph.g-num { --g: var(--accent); }
+.dg-glyph.g-text { --g: var(--secondary); }
+.dg-glyph.g-json, .dg-glyph.g-array { --g: var(--warn); }
+.dg-glyph.g-date, .dg-glyph.g-time { --g: var(--good); }
+.dg-glyph.g-bool { --g: var(--brand); }
+.dg-glyph.g-none { border-style: dashed; background: none; }
+
+/* ---------------------------------------------------------------- statistics from sample rows: meter, histogram, frequency */
+.dg-mini { display: grid; gap: 3px; width: 84px; height: 25px; align-content: start; }
+.dg-meter { display: block; height: 4px; border-radius: 2px; overflow: hidden; background: color-mix(in srgb, var(--muted) 22%, var(--surface)); }
+.dg-meter i { display: block; height: 100%; background: var(--good); }
+.dg-hist { display: flex; align-items: flex-end; gap: 2px; height: 18px; border-bottom: 1px solid var(--line-strong); }
+.dg-hist i { flex: 1 1 0; background: color-mix(in srgb, var(--accent) 72%, var(--surface)); border-radius: 1px 1px 0 0; }
+.dg-freq { display: flex; gap: 1px; height: 8px; border-radius: 2px; overflow: hidden; }
+.dg-freq i { min-width: 3px; background: var(--accent); }
+.dg-freq i.s1 { background: color-mix(in srgb, var(--accent) 66%, var(--surface)); }
+.dg-freq i.s2 { background: color-mix(in srgb, var(--accent) 44%, var(--surface)); }
+.dg-freq i.s3 { background: color-mix(in srgb, var(--accent) 28%, var(--surface)); }
+.dg-freq i.s-rest { background: color-mix(in srgb, var(--muted) 30%, var(--surface)); }
+.dg-st-t { display: block; margin-top: 4px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* column stats (D30): one badge per header (.dg-sb, a tiny bar-chart glyph; a dot when the column has nulls) and one
+   popover per grid (.dg-spop): hover or focus shows it, a click keeps it open as a dropdown under the header */
+.dg-hc { display: flex; align-items: center; gap: 6px; }
+.dg-head th.num .dg-hc { justify-content: flex-end; }
+.dg-sb {
+  position: relative; flex: none; display: inline-grid; place-items: center; width: 20px; height: 20px; padding: 0; margin: 0;
+  border: 1px solid transparent; border-radius: 5px; background: none; color: var(--muted); cursor: pointer;
+}
+.dg-sb svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; }
+.dg-sb:hover, .dg-sb:focus-visible, .dg-sb.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); border-color: color-mix(in srgb, var(--accent) 35%, var(--surface)); }
+.dg-sb.nulls::after { content: ""; position: absolute; top: 1px; right: 1px; width: 5px; height: 5px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 0 1px var(--surface-2); }
+.dg-spop {
+  position: absolute; z-index: 8; display: none; width: min(280px, 86vw); padding: 10px 12px; box-sizing: border-box;
+  background: var(--surface); color: var(--fg); border: 1px solid var(--line); border-radius: var(--r-md); box-shadow: 0 10px 30px var(--shadow);
+  font-size: var(--fs-xs); line-height: 1.4; text-align: left;
+}
+.dg-spop.show { display: grid; gap: 6px; }
+.dg-spop.open { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.dg-spop p { margin: 0; max-width: none; }
+.dg-sp-h { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.dg-sp-h code { font: 700 var(--fs-sm)/1.3 var(--font-mono); padding: 0; background: none; border: 0; color: var(--fg); overflow-wrap: anywhere; }
+.dg-sp-h span { color: var(--muted); font-family: var(--font-mono); }
+.dg-sp-n b { font-weight: 650; }
+.dg-sp-r { color: var(--muted); }
+.dg-sp-r code { font-family: var(--font-mono); padding: 0; background: none; border: 0; color: var(--fg); }
+.dg-sp-d { display: block; }
+.dg-sp-d .dg-hist { height: 22px; }
+.dg-sp-d .dg-freq { height: 10px; }
+.dg-sp-note { color: var(--muted); }
+
+/* ---------------------------------------------------------------- Columns: change indicator per row, stats beside the type */
+.schema-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: var(--fs-xs); color: var(--muted); max-width: none; margin: 0; }
+.schema-legend > span { display: inline-flex; align-items: center; gap: 6px; }
+.schema-legend .lg { flex: none; width: 14px; height: 12px; border-radius: 2px; border: 1px solid var(--line); background: var(--surface); }
+.schema-legend .lg.new { background: color-mix(in srgb, var(--good) 14%, var(--surface)); border-color: var(--good); border-left-width: 3px; }
+.schema-legend .lg.changed { background: color-mix(in srgb, var(--warn) 16%, var(--surface)); border-color: var(--warn); border-left-width: 3px; }
+.schema-legend .lg.dropped { background: color-mix(in srgb, var(--danger) 14%, var(--surface)); border-color: var(--danger); border-left-width: 3px; }
+
+.dg-cols table { font-size: var(--fs-sm); }
+.dg-cols th, .dg-cols td { padding: 7px 10px; }
+.dg-cols th.num, .dg-cols td.num { text-align: right; }
+.dg-cols td.cn { min-width: 20ch; max-width: 30ch; }
+.dg-cols .cn-h { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.dg-cols td.cn code { font-weight: 600; background: none; padding: 0; white-space: nowrap; color: var(--fg); }
+.dg-cols .cnote { display: block; margin-top: 4px; font-size: var(--fs-xs); line-height: 1.45; color: var(--muted); }
+.dg-cols td.ct { font: 400 0.74rem/1.45 var(--font-mono); overflow-wrap: anywhere; min-width: 14ch; max-width: 28ch; }
+.dg-cols td.num { font: 500 0.78rem/1.45 var(--font-mono); white-space: nowrap; }
+.dg-cols td.rg { min-width: 15ch; }
+.dg-range { display: grid; gap: 2px; font-size: var(--fs-xs); line-height: 1.4; }
+.dg-range i { font-style: normal; font: 600 0.6rem/1 var(--font-body); text-transform: uppercase; letter-spacing: var(--tr-label); color: var(--muted); margin-right: 2px; }
+.dg-range code { font-size: 0.72rem; background: none; padding: 0; overflow-wrap: anywhere; }
+.dg-cols td.ds { width: 88px; padding-top: 10px; }
+.dg-cols tr.col-new td { background: color-mix(in srgb, var(--good) 7%, var(--surface)); }
+.dg-cols tr.col-changed td { background: color-mix(in srgb, var(--warn) 10%, var(--surface)); }
+.dg-cols tr.col-dropped td { background: color-mix(in srgb, var(--danger) 8%, var(--surface)); }
+.dg-cols tr.col-new td:first-child { box-shadow: inset 3px 0 0 var(--good); }
+.dg-cols tr.col-changed td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
+.dg-cols tr.col-dropped td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
+.dg-cols tr.col-dropped td.cn code { color: var(--muted); }
+.dg-cols del { text-decoration-thickness: 1.5px; }
+.was { display: block; margin-top: 3px; font-size: 0.75rem; color: var(--muted); }
+.was del { color: var(--muted); text-decoration-color: color-mix(in srgb, var(--danger) 70%, transparent); text-decoration-thickness: 1px; }
+/* phones: each column becomes a card (name and chip, note, type, then the stats in two columns) */
+@media (max-width: 560px) {
+  .dg-cols table, .dg-cols tbody { display: block; }
+  .dg-cols thead { display: none; }
+  .dg-cols tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .dg-cols tr:last-child { border-bottom: 0; }
+  .dg-cols td { border-bottom: 0; padding-block: 2px; min-width: 0; max-width: none; }
+  .dg-cols td.cn, .dg-cols td.ct, .dg-cols td.rg { grid-column: 1 / -1; }
+  .dg-cols td.num { text-align: left; }
+  .dg-cols td.num::before { content: attr(data-l) " "; font: 600 0.6rem/1 var(--font-body); text-transform: uppercase; letter-spacing: var(--tr-label); color: var(--muted); }
+  .dg-cols td.ds { grid-column: 1 / -1; width: auto; padding-top: 4px; }
+  .dg-cols td.ct { overflow-wrap: break-word; }
+  .dg-cols tr.col-new td, .dg-cols tr.col-changed td, .dg-cols tr.col-dropped td { background: none; box-shadow: none; }
+  .dg-cols tr.col-new { background: color-mix(in srgb, var(--good) 7%, var(--surface)); box-shadow: inset 3px 0 0 var(--good); }
+  .dg-cols tr.col-changed { background: color-mix(in srgb, var(--warn) 10%, var(--surface)); box-shadow: inset 3px 0 0 var(--warn); }
+  .dg-cols tr.col-dropped { background: color-mix(in srgb, var(--danger) 8%, var(--surface)); box-shadow: inset 3px 0 0 var(--danger); }
+  .dg-grid { max-height: 52dvh; }
+  .dg-actions { margin-left: 0; }
+}
+
+/* ---------------------------------------------------------------- Details: the brief (below), then the table facts */
+.dg-details { display: grid; gap: 22px; }
+.dg-kv { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px 16px; }
+.dg-kv > div { display: grid; gap: 2px; min-width: 0; }
+.dg-kv dt { font: 600 var(--fs-xs)/1.3 var(--font-body); text-transform: uppercase; letter-spacing: var(--tr-label); color: var(--muted); }
+.dg-kv dd { margin: 0; font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.dg-kv dd code { background: none; padding: 0; font-weight: 600; }
+
+/* ---------------------------------------------------------------- DDL, indexes, notes, where it appears */
+.drawer-body pre.ddl { max-height: 440px; font-size: 0.74rem; line-height: 1.5; background: var(--code-bg); }
+.mono-list { font: 400 0.76rem/1.5 var(--font-mono); gap: 3px; }
+.mono-list li, .drawer-notes li, .where li { max-width: none; }
+.drawer-notes { font-size: var(--fs-sm); }
+.where { list-style: none; padding: 0; gap: 6px; font-size: var(--fs-sm); }
+.where .kind { margin-left: 6px; font: 600 0.66rem/1 var(--font-body); text-transform: uppercase; letter-spacing: var(--tr-label); color: var(--muted); }
+.where .more { color: var(--muted); }
+
+/* ---------------------------------------------------------------- the docked chat (DataChat.tsx) */
+.dchat {
+  flex: none; display: grid; gap: 8px; min-width: 0;
+  padding: 10px max(20px, env(safe-area-inset-right, 0px)) max(12px, env(safe-area-inset-bottom, 0px)) 20px;
+  background: color-mix(in srgb, var(--accent) 4%, var(--surface)); border-top: 1px solid var(--line);
+}
+.dchat-off, .dchat-src { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin: 0; max-width: none; font-size: var(--fs-xs); line-height: 1.45; color: var(--muted); }
+.dchat-off b, .dchat-src b { color: var(--fg); font-weight: 600; }
+.dchat-src code { font-size: 0.95em; }
+.dchat-src .warn { color: var(--warn); }
+.dchat-src .linkish { margin-left: auto; font-size: var(--fs-xs); }
+.dchat-log { display: grid; gap: 8px; align-content: start; max-height: min(34dvh, 320px); overflow-y: auto; overscroll-behavior: contain; padding: 2px 2px 2px 0; }
+.dchat-msg { min-width: 0; font-size: var(--fs-sm); line-height: 1.5; border-radius: var(--r-md); }
+.dchat-msg.user { justify-self: end; max-width: 85%; padding: 6px 11px; color: var(--fg); background: color-mix(in srgb, var(--accent) 13%, var(--surface)); }
+.dchat-msg.assistant { padding: 8px 12px; background: var(--surface); border: 1px solid var(--line); display: grid; gap: 6px; }
+.dchat-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.dchat-steps { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; font: 400 0.7rem/1.4 var(--font-mono); color: var(--muted); }
+.dchat-steps li::before { content: "↳ "; }
+.dchat-note { font-size: var(--fs-xs); color: var(--muted); }
+.dchat-msg.failed .dchat-note { color: var(--danger); }
+.dchat-form { display: flex; gap: 8px; align-items: flex-end; }
+.dchat-form textarea {
+  flex: 1 1 auto; min-width: 0; min-height: 36px; max-height: 120px; field-sizing: content; resize: none; box-sizing: border-box;
+  font: 400 var(--fs-sm)/1.45 var(--font-body); color: var(--fg); background: var(--surface);
+  padding: 7px 10px; border: 1px solid var(--line-strong); border-radius: var(--r-md);
+}
+.dchat-form textarea::placeholder { color: var(--muted); }
+.dchat-form textarea:disabled { opacity: 0.6; }
+.dchat-btn {
+  flex: none; height: 36px; padding: 0 16px; border-radius: var(--r-pill); cursor: pointer;
+  font: 600 var(--fs-sm)/1 var(--font-body); color: var(--bg); background: var(--accent); border: 1px solid var(--accent);
+}
+.dchat-btn:disabled { opacity: 0.45; cursor: default; }
+.dchat-btn.stop { color: var(--fg); background: var(--surface); border-color: var(--line-strong); }
+
+/* ---------------------------------------------------------------- diagram boxes that open the drawer
+   A small "rows" badge in the box's top-right corner, visible without hover. The diagram plate stays light in both
+   themes, so the badge uses the theme-invariant swatch tokens (dark text on the light blue swatch). */
+.hs.has-table::after {
+  content: "rows"; position: absolute; top: 4px; right: 4px; pointer-events: none;
+  padding: 2px 6px; border-radius: var(--r-sm);
+  font: 600 10px/1.3 var(--font-mono); letter-spacing: 0.02em;
+  color: var(--media); background: var(--sw-blue-fill); border: 1px solid var(--sw-blue-line);
+  box-shadow: 0 1px 2px var(--shadow);
+}
+.hs.has-table:hover::after, .hs.has-table:focus-visible::after { color: var(--plate); background: var(--sw-blue-line); }
+.hs.tnode::after { content: none; }
+
+/* ---------------------------------------------------------------- table cards over schema-diagram boxes (D26, TableNode.tsx)
+   The card covers its box exactly and scales with the drawing: .hs.tnode is a size container and .tn-in sets its em
+   from --fs (a percent of the card's width, set per card), so every size below is in em and matches the line heights
+   TableNode.tsx fits the column list with. Column names and tile numbers are 1em (about 11.5 px at a 1440 window),
+   keys 1.15em, every label at least .91em. Colours come from the theme tokens, so the cards are light in the light
+   theme and dark in the dark one; the tone (green, grey, blue, amber, red, violet) tints the frame and the head. */
+.hs.tnode {
+  --fs: 4; /* 1em as a percent of the card's width; TableNode.tsx sets it per card from the drawing's own size */
+  --tn-tone: var(--line-strong);
+  --tn-ink: var(--fg);
+  --tn-mute: var(--muted);
+  --tn-body: var(--surface);
+  --tn-fill: color-mix(in srgb, var(--tn-tone) 13%, var(--surface));
+  --tn-line: color-mix(in srgb, var(--tn-tone) 75%, var(--surface));
+  --tn-up-ink: color-mix(in srgb, var(--danger) 80%, var(--fg));
+  --tn-up-bg: color-mix(in srgb, var(--danger) 11%, var(--surface));
+  --tn-down-ink: color-mix(in srgb, var(--good) 80%, var(--fg));
+  --tn-down-bg: color-mix(in srgb, var(--good) 11%, var(--surface));
+  --tn-warn-ink: color-mix(in srgb, var(--warn) 80%, var(--fg));
+  --tn-warn-bg: color-mix(in srgb, var(--warn) 13%, var(--surface));
+  --tn-fk-ink: color-mix(in srgb, var(--accent) 80%, var(--fg));
+  --tn-fk-bg: color-mix(in srgb, var(--accent) 11%, var(--surface));
+  container-type: size; border: 0; border-radius: 0; color: var(--tn-ink); background: none; text-decoration: none;
+}
+.hs.tnode.tone-green { --tn-tone: var(--good); }
+.hs.tnode.tone-blue { --tn-tone: var(--accent); }
+.hs.tnode.tone-amber { --tn-tone: var(--warn); }
+.hs.tnode.tone-red { --tn-tone: var(--danger); }
+.hs.tnode.tone-violet { --tn-tone: var(--secondary); }
+.hs.tnode:hover, .hs.tnode:focus-visible { background: none; }
+.tn-in {
+  font-size: calc(var(--fs) * 1cqw); box-sizing: border-box; display: flex; flex-direction: column; width: 100%; height: 100%;
+  padding: 0 .65em .4em; overflow: hidden; text-align: left; line-height: 1.4;
+  background: var(--tn-body); border: .125em solid var(--tn-line); border-radius: .45em;
+  box-shadow: 0 .1em .6em var(--shadow);
+  transition: border-color .12s ease, box-shadow .12s ease;
+}
+.hs.tnode.dashed .tn-in { border-style: dashed; }
+.hs.tnode.compact .tn-in { padding-bottom: .2em; } /* no strip: name, chip, key lines and the count (TableNode.tsx PAD_COMPACT_EM) */
+.hs.tnode:hover .tn-in, .hs.tnode:focus-visible .tn-in { border-color: var(--accent); box-shadow: 0 0 0 .2em color-mix(in srgb, var(--accent) 35%, transparent), 0 .3em 1em var(--shadow); }
+
+.tn-head {
+  flex: none; display: flex; align-items: center; gap: .4em; height: 1.95em; box-sizing: border-box; min-width: 0;
+  margin: 0 -.65em .3em; padding: 0 .65em; white-space: nowrap;
+  background: var(--tn-fill); border-bottom: .0625em solid color-mix(in srgb, var(--tn-tone) 40%, var(--surface));
+}
+.tn-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 700 1.12em/1.3 var(--font-mono); color: var(--tn-ink); letter-spacing: -0.01em; }
+.tn-chip {
+  flex: none; font: 650 .91em/1 var(--font-body); padding: .18em .45em; border-radius: var(--r-pill);
+  color: var(--tn-ink); background: var(--surface); border: .08em solid var(--line-strong);
+}
+.tn-chip.new { color: var(--tn-down-ink); background: var(--tn-down-bg); border-color: color-mix(in srgb, var(--good) 55%, var(--surface)); }
+.tn-chip.changed { color: var(--tn-warn-ink); background: var(--tn-warn-bg); border-color: color-mix(in srgb, var(--warn) 55%, var(--surface)); }
+.tn-desc { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 400 .91em/1.3 var(--font-body); color: var(--tn-mute); }
+.tn-hidden { flex: none; margin-left: auto; font: 650 .91em/1 var(--font-mono); color: var(--tn-mute); }
+
+.tn-cols { flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.tn-col {
+  flex: none; display: flex; align-items: center; gap: .4em; height: 1.45em; min-width: 0; white-space: nowrap;
+  margin: 0 -.35em; padding: 0 .35em; border-radius: .25em;
+}
+.tn-col.tn-key { font-size: 1.15em; height: 1.4em; }
+/* on a line only the → reference shrinks: the name keeps up to 58% of the line and the type up to 28% before either is cut */
+.tn-cn { flex: none; max-width: 58%; min-width: 0; overflow: hidden; text-overflow: ellipsis; padding: 0; background: none; font: 550 1em/1.3 var(--font-mono); color: var(--tn-ink); }
+.tn-col.tn-key .tn-cn { font-weight: 700; }
+.tn-k {
+  flex: none; font: 700 .8em/1 var(--font-mono); font-style: normal; letter-spacing: .03em; padding: .2em .35em; border-radius: .3em;
+  color: var(--tn-warn-ink); background: var(--tn-warn-bg); border: .08em solid color-mix(in srgb, var(--warn) 50%, var(--surface));
+}
+.tn-k.fk { color: var(--tn-fk-ink); background: var(--tn-fk-bg); border-color: color-mix(in srgb, var(--accent) 45%, var(--surface)); }
+.tn-ref { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 500 .82em/1.3 var(--font-mono); color: var(--tn-fk-ink); }
+.tn-ty { flex: none; max-width: 28%; min-width: 0; margin-left: auto; padding-left: .4em; overflow: hidden; text-overflow: ellipsis; font: 400 .91em/1.3 var(--font-mono); color: var(--tn-mute); }
+.tn-col.tn-key .tn-ty { font-size: .8em; }
+.tn-tag { flex: none; font: 650 .91em/1 var(--font-body); padding: .14em .4em; border-radius: .25em; color: var(--tn-ink); background: var(--surface); }
+.tn-col.ch-new { background: var(--tn-down-bg); box-shadow: inset .2em 0 0 var(--good); }
+.tn-col.ch-changed { background: var(--tn-warn-bg); box-shadow: inset .2em 0 0 var(--warn); }
+.tn-col.ch-dropped { background: var(--tn-up-bg); box-shadow: inset .2em 0 0 var(--danger); }
+.tn-col.ch-dropped .tn-cn { text-decoration: line-through; color: var(--tn-mute); }
+.tn-tag.new { color: var(--tn-down-ink); }
+.tn-tag.changed { color: var(--tn-warn-ink); }
+.tn-tag.dropped { color: var(--tn-up-ink); }
+.tn-more { flex: none; height: 1.45em; font: 500 .91em/1.45 var(--font-body); color: var(--tn-mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* the sizing strip (D28): one row of four measures, rows, cols, writes and cost. Each: an icon, the production number
+   ("–" when not measured) and the expected change after the design as a pill (red rises, green falls or stays, grey
+   with no stated direction; no pill when not estimated). No labels or prose in the row: a measure's tooltip and the
+   card's hover card (TableBrief) carry the words. 1.35em tall with its top rule (TableNode.tsx STRIP_EM), a third of
+   the three-row tiles it replaced; .tight drops the icons when four measures do not fit with them. */
+.tn-strip {
+  flex: none; box-sizing: border-box; height: 1.35em; margin: .3em -.65em 0; padding: 0 .65em;
+  display: flex; align-items: center; justify-content: space-between; gap: .5em; white-space: nowrap;
+  border-top: .0625em solid color-mix(in srgb, var(--tn-tone) 40%, var(--surface));
+}
+.tn-m { display: inline-flex; align-items: center; gap: .25em; min-width: 0; height: 100%; padding: 0 .15em; border-radius: .3em; cursor: help; }
+.tn-m:hover { background: var(--surface-2); }
+.tn-ico { flex: none; width: 1.15em; height: 1.15em; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.tn-strip .tn-ico { width: 1em; height: 1em; color: var(--tn-mute); }
+.tn-strip.tight .tn-ico { display: none; }
+.tn-v { flex: none; font: 750 1em/1.2 var(--font-body); color: var(--tn-ink); font-variant-numeric: tabular-nums; }
+.tn-v.none { font-weight: 500; color: var(--tn-mute); }
+.tn-d, .tb-d {
+  flex: none; box-sizing: border-box; display: inline-flex; align-items: center; gap: .25em; white-space: nowrap;
+  padding: .06em .4em; border-radius: var(--r-pill); font: 650 .91em/1.2 var(--font-body); color: var(--tn-ink);
+  background: color-mix(in srgb, var(--muted) 16%, var(--surface)); font-variant-numeric: tabular-nums;
+}
+.tn-d.up, .tb-d.up { color: var(--tn-up-ink); background: var(--tn-up-bg); }
+.tn-d.down, .tn-d.same, .tb-d.down, .tb-d.same { color: var(--tn-down-ink); background: var(--tn-down-bg); }
+.tn-dir-ico { flex: none; width: .72em; height: .72em; fill: currentColor; stroke: currentColor; stroke-width: 1.2; stroke-linejoin: round; }
+.tn-d.same .tn-dir-ico, .tn-d.unknown .tn-dir-ico, .tb-d.same .tn-dir-ico, .tb-d.unknown .tn-dir-ico { fill: none; stroke-width: 1.5; stroke-linecap: round; }
+
+/* a strip measure's tooltip (Overlays.tsx TipPop): page-sized text */
+.tn-tip {
+  position: absolute; z-index: 31; display: none; width: min(340px, 86vw); padding: 9px 12px; pointer-events: none;
+  background: var(--surface); color: var(--fg); border: 1px solid var(--line); border-radius: var(--r-md);
+  box-shadow: 0 10px 30px var(--shadow); font-size: var(--fs-xs); line-height: 1.45; text-align: left;
+}
+.tn-tip.show { display: grid; gap: 3px; }
+.tn-tip b { font-size: var(--fs-sm); }
+.tn-tip .k { color: var(--muted); font-weight: 600; }
+.tn-tip .up { color: var(--danger); font-weight: 600; }
+.tn-tip .down, .tn-tip .same { color: var(--good); font-weight: 600; }
+
+/* ---------------------------------------------------------------- the table brief (TableBrief.tsx, D28)
+   One shape for a table's detail: the hotspot card of a table box (.tbrief.pop in .hs-pop.has-brief) and the top of
+   the drawer's Details tab (.tbrief.drawer): purpose, a measures table, trade-offs, and a mini diagram (.mm) of the
+   table's place, drawn from the cards' keys. Theme tokens only. */
+.tbrief {
+  --tn-ink: var(--fg); --tn-mute: var(--muted);
+  --tn-up-ink: color-mix(in srgb, var(--danger) 80%, var(--fg));
+  --tn-up-bg: color-mix(in srgb, var(--danger) 11%, var(--surface));
+  --tn-down-ink: color-mix(in srgb, var(--good) 80%, var(--fg));
+  --tn-down-bg: color-mix(in srgb, var(--good) 11%, var(--surface));
+  display: grid; gap: 10px; min-width: 0; color: var(--fg); font-size: var(--fs-sm); line-height: 1.45;
+}
+.hs-pop.has-brief { width: min(620px, 94vw); padding: 12px 14px; }
+.tbrief.drawer { gap: 22px; }
+.tb-title { margin: 0; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tb-title code { font: 700 1rem/1.25 var(--font-mono); padding: 0; background: none; border: 0; color: var(--fg); overflow-wrap: anywhere; }
+.tb-chip { flex: none; font: 650 var(--fs-xs)/1 var(--font-body); padding: 3px 8px; border-radius: var(--r-pill); color: var(--fg); background: var(--surface); border: 1px solid var(--line-strong); }
+.tb-chip.new { color: var(--tn-down-ink); background: var(--tn-down-bg); border-color: color-mix(in srgb, var(--good) 55%, var(--surface)); }
+.tb-chip.changed { color: color-mix(in srgb, var(--warn) 80%, var(--fg)); background: color-mix(in srgb, var(--warn) 13%, var(--surface)); border-color: color-mix(in srgb, var(--warn) 55%, var(--surface)); }
+.tb-purpose { margin: 0; max-width: none; color: var(--fg); }
+.tbrief.pop .tb-purpose { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tbrief h4 { margin: 0 0 4px; font: 700 var(--fs-xs)/1.3 var(--font-body); letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.tb-measures { width: 100%; border-collapse: collapse; font-size: var(--fs-xs); line-height: 1.35; font-variant-numeric: tabular-nums; }
+.tb-measures th, .tb-measures td { padding: 4px 10px 4px 0; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+.tb-measures th:last-child, .tb-measures td:last-child { padding-right: 0; }
+.tb-measures thead th { font-weight: 600; color: var(--muted); white-space: nowrap; border-bottom-color: var(--line-strong); }
+.tb-measures tbody th { font-weight: 650; white-space: nowrap; color: var(--fg); }
+.tb-measures tbody tr.extra th { font-weight: 500; }
+.tb-measures .none { color: var(--muted); font-style: italic; }
+.tb-measures td.src { color: var(--muted); }
+.tb-measures td.d { white-space: nowrap; }
+.tb-more { margin: 4px 0 0; max-width: none; font-size: var(--fs-xs); color: var(--muted); }
+.tb-basis { display: grid; gap: 3px; margin: 8px 0 0; font-size: var(--fs-xs); line-height: 1.4; color: var(--muted); }
+.tb-basis > div { display: grid; grid-template-columns: 7.5em 1fr; gap: 8px; }
+.tb-basis dt { font-weight: 600; color: var(--fg); }
+.tb-basis dd { margin: 0; }
+.tb-trade ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 3px; }
+.tb-trade li { display: grid; grid-template-columns: 1.1em 1fr; gap: 4px; font-size: var(--fs-xs); line-height: 1.4; }
+.tb-sign { font-weight: 800; text-align: center; }
+.tb-trade li.gain .tb-sign { color: var(--tn-down-ink); }
+.tb-trade li.cost .tb-sign { color: var(--tn-up-ink); }
+.tb-map-box { overflow-x: auto; overscroll-behavior-x: contain; }
+.mm { display: block; width: 100%; min-width: 440px; max-width: 600px; height: auto; }
+.tb-map-key { margin: 4px 0 0; max-width: none; font-size: var(--fs-xs); color: var(--muted); }
+/* borders at 3:1 or more against the panel in both themes (WCAG 1.4.11; measured grey, green, blue: light 3.8-4.4, dark 4.9-7.3) */
+.mm-node rect { fill: var(--surface-2); stroke: color-mix(in srgb, var(--muted) 80%, var(--surface)); stroke-width: 1.2; }
+.mm-node.t-green rect { fill: color-mix(in srgb, var(--good) 12%, var(--surface)); stroke: color-mix(in srgb, var(--good) 85%, var(--surface)); }
+.mm-node.t-blue rect { fill: color-mix(in srgb, var(--accent) 10%, var(--surface)); stroke: color-mix(in srgb, var(--accent) 85%, var(--surface)); }
+.mm-node.t-amber rect { fill: color-mix(in srgb, var(--warn) 12%, var(--surface)); stroke: color-mix(in srgb, var(--warn) 85%, var(--surface)); }
+.mm-node.t-red rect { fill: color-mix(in srgb, var(--danger) 10%, var(--surface)); stroke: color-mix(in srgb, var(--danger) 85%, var(--surface)); }
+.mm-node.t-violet rect { fill: color-mix(in srgb, var(--secondary) 10%, var(--surface)); stroke: color-mix(in srgb, var(--secondary) 85%, var(--surface)); }
+.mm-node.ext rect, .mm-node.t-more rect { fill: var(--surface); stroke-dasharray: 4 3; }
+.mm-node.mid rect { stroke-width: 2.2; }
+.mm-name { font: 600 13.5px var(--font-mono); fill: currentColor; color: var(--fg); }
+.mm-node.mid .mm-name { font-size: 14px; font-weight: 700; }
+.mm-key { font: 500 13px var(--font-mono); fill: currentColor; color: var(--muted); }
+.mm-state { font: 600 12px var(--font-body); fill: currentColor; color: var(--muted); }
+.mm-wlabel { font: 600 12px var(--font-body); fill: currentColor; color: var(--fg); }
+.mm-edge { fill: none; stroke: var(--muted); stroke-width: 1.4; }
+.mm-edge.w { stroke-dasharray: 3 3; }
+.mm-arrow { fill: var(--muted); }
